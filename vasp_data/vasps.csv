@@ -1,0 +1,4 @@
+legal_name,fiu_reg,jurisdiction,r_score
+Demo VASP IN,true,IN,0.90
+Compliant Foreign,false,SG,0.55
+Offshore,false,XX,0.10

@@ -1,0 +1,55 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+      - neo4j
+    environment:
+      DEMO_MODE: ${DEMO_MODE:-true}
+      EXT_ENABLED: ${EXT_ENABLED:-false}
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sih}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sih}
+      POSTGRES_DB: ${POSTGRES_DB:-sih26183}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  neo4j:
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-sih26183}
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neodat:/data
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.web
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  neodat:

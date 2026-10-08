@@ -1,0 +1,1 @@
+placeholder for sponsor_cache.parquet (pre-fetched, 2GB kit via SHA256SUMS)

@@ -1,0 +1,21 @@
+[project]
+name = "sih26183-fraud-linked-vasp-tracer"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "pydantic-settings",
+  "sqlalchemy",
+  "alembic",
+  "psycopg[binary]",
+  "redis",
+  "neo4j",
+  "lightgbm",
+  "scikit-learn",
+  "onnxruntime",
+  "python-jose",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
