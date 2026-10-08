@@ -1,0 +1,6 @@
+# Local-only overrides. Edit freely.
+services:
+  api:
+    environment:
+      LOG_LEVEL: DEBUG
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

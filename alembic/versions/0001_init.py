@@ -1,11 +1,43 @@
-"""Phase 8 DDL — full 18 tables live in spec; implement via models here.
-See SIH26183 spec Phase 8 for Postgres16 DDL.
-"""
+"""Phase 8 DDL — Postgres 16, 18 tables (spec P8). EXT tables gated by app flag, DDL present."""
 revision = "0001"
 down_revision = None
 
+DDL = """
+CREATE TABLE IF NOT EXISTS investigators(investigator_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), badge_id VARCHAR(64) UNIQUE NOT NULL, display_name VARCHAR(128) NOT NULL, department VARCHAR(128) NOT NULL, role VARCHAR(32) NOT NULL, is_active BOOLEAN DEFAULT TRUE, created_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS cases(case_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), ncrp_ack_no VARCHAR(128) UNIQUE, sahyog_case_ref VARCHAR(128) UNIQUE, title VARCHAR(256) NOT NULL, status VARCHAR(32) DEFAULT 'open', priority VARCHAR(16) DEFAULT 'medium', lead_investigator_id UUID NOT NULL REFERENCES investigators(investigator_id), opened_at TIMESTAMPTZ DEFAULT now(), closed_at TIMESTAMPTZ);
+CREATE TABLE IF NOT EXISTS chains(chain_id SMALLINT PRIMARY KEY, chain_code VARCHAR(16) UNIQUE NOT NULL, account_model VARCHAR(16) NOT NULL, native_asset_symbol VARCHAR(16) NOT NULL);
+CREATE TABLE IF NOT EXISTS wallet_addresses(address_pk UUID PRIMARY KEY DEFAULT gen_random_uuid(), chain_id SMALLINT NOT NULL REFERENCES chains(chain_id), address VARCHAR(128) NOT NULL, address_type VARCHAR(32), first_seen_at TIMESTAMPTZ, last_seen_at TIMESTAMPTZ, UNIQUE(chain_id, address));
+CREATE TABLE IF NOT EXISTS tokens(token_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), chain_id SMALLINT NOT NULL REFERENCES chains(chain_id), contract_address VARCHAR(128), symbol VARCHAR(32) NOT NULL, decimals SMALLINT DEFAULT 18, UNIQUE(chain_id, contract_address));
+CREATE TABLE IF NOT EXISTS blocks(block_pk UUID PRIMARY KEY DEFAULT gen_random_uuid(), chain_id SMALLINT NOT NULL REFERENCES chains(chain_id), height BIGINT NOT NULL, block_hash VARCHAR(128) NOT NULL, block_timestamp TIMESTAMPTZ NOT NULL, UNIQUE(chain_id, height));
+CREATE TABLE IF NOT EXISTS transactions(tx_pk UUID PRIMARY KEY DEFAULT gen_random_uuid(), chain_id SMALLINT NOT NULL REFERENCES chains(chain_id), tx_hash VARCHAR(128) NOT NULL, block_pk UUID REFERENCES blocks(block_pk), from_address_pk UUID REFERENCES wallet_addresses(address_pk), to_address_pk UUID REFERENCES wallet_addresses(address_pk), token_id UUID REFERENCES tokens(token_id), amount NUMERIC(38,18) NOT NULL, fee NUMERIC(38,18), tx_status VARCHAR(16) DEFAULT 'confirmed', tx_type VARCHAR(32), source_provider VARCHAR(64) NOT NULL, ingested_at TIMESTAMPTZ DEFAULT now(), UNIQUE(chain_id, tx_hash, from_address_pk, to_address_pk, amount));
+CREATE TABLE IF NOT EXISTS vasps(vasp_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), legal_name VARCHAR(256) NOT NULL, fiu_ind_registered BOOLEAN DEFAULT FALSE, jurisdiction VARCHAR(64), sla_hours INT DEFAULT 72, contact_nodal VARCHAR(256), freeze_mechanism VARCHAR(128), r_score NUMERIC(3,2) DEFAULT 0.5, label_ttl_hours INT DEFAULT 168, last_verified_at TIMESTAMPTZ, verification_source VARCHAR(128), is_active BOOLEAN DEFAULT TRUE);
+CREATE TABLE IF NOT EXISTS vasp_addresses(vasp_address_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), vasp_id UUID NOT NULL REFERENCES vasps(vasp_id), address_pk UUID NOT NULL REFERENCES wallet_addresses(address_pk), address_role VARCHAR(32) NOT NULL, evidence_tier SMALLINT NOT NULL, label_source VARCHAR(64) NOT NULL, confirmed_at TIMESTAMPTZ, UNIQUE(address_pk, vasp_id, address_role));
+CREATE TABLE IF NOT EXISTS upi_vault(entry_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), upi_hash CHAR(64) NOT NULL UNIQUE, salt_version SMALLINT NOT NULL DEFAULT 1, hint VARCHAR(32), first_seen TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS upi_links_ext(link_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), case_id UUID NOT NULL REFERENCES cases(case_id), upi_hash CHAR(64) NOT NULL REFERENCES upi_vault(upi_hash), dt_sec INT, amt_err_pct NUMERIC(5,2), score NUMERIC(5,2), price_source VARCHAR(64), price_ts TIMESTAMPTZ);
+CREATE TABLE IF NOT EXISTS sponsors_ext(sponsor_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), chain_id SMALLINT NOT NULL REFERENCES chains(chain_id), address VARCHAR(128) NOT NULL, out_degree INT DEFAULT 0, median_trx NUMERIC, burst_std_sec INT, activation_rate NUMERIC(4,3), UNIQUE(chain_id, address));
+CREATE TABLE IF NOT EXISTS operator_cases_ext(operator_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), case_id UUID NOT NULL REFERENCES cases(case_id), victim_count INT NOT NULL, complaint_ids TEXT[] NOT NULL, total_loss_inr BIGINT, status VARCHAR(32) DEFAULT 'candidate', created_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS label_votes(vote_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), vasp_address_id UUID, new_tier SMALLINT NOT NULL, reason TEXT NOT NULL, signer_id UUID NOT NULL REFERENCES investigators(investigator_id), sig VARCHAR(256) NOT NULL, voted_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS transaction_paths(path_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), case_id UUID NOT NULL REFERENCES cases(case_id), suspect_address_pk UUID NOT NULL REFERENCES wallet_addresses(address_pk), hop_sequence UUID[] NOT NULL, tx_sequence UUID[] NOT NULL, weighted_distance NUMERIC(10,4) NOT NULL, freezability NUMERIC(5,3) NOT NULL DEFAULT 0, created_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS attribution_candidates(candidate_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), case_id UUID NOT NULL REFERENCES cases(case_id), path_id UUID NOT NULL REFERENCES transaction_paths(path_id), vasp_id UUID NOT NULL REFERENCES vasps(vasp_id), proximity_rank NUMERIC(10,4) NOT NULL, freezability NUMERIC(5,3) NOT NULL, confidence_score NUMERIC(5,2) NOT NULL, evidence_tier SMALLINT NOT NULL, status VARCHAR(32) DEFAULT 'proposed', generated_at TIMESTAMPTZ DEFAULT now(), reviewed_by UUID REFERENCES investigators(investigator_id), reviewed_at TIMESTAMPTZ);
+CREATE TABLE IF NOT EXISTS attribution_evidence(evidence_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), candidate_id UUID NOT NULL REFERENCES attribution_candidates(candidate_id), evidence_type VARCHAR(64) NOT NULL, supporting_tx_pk UUID REFERENCES transactions(tx_pk), description TEXT NOT NULL, source_provider VARCHAR(64), api_response_hash VARCHAR(128), created_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS risk_assessments(risk_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), case_id UUID NOT NULL REFERENCES cases(case_id), address_pk UUID NOT NULL REFERENCES wallet_addresses(address_pk), risk_score NUMERIC(5,2) NOT NULL, typology VARCHAR(64), shap_top5 JSONB, assessed_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS alerts(alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), case_id UUID REFERENCES cases(case_id), address_pk UUID REFERENCES wallet_addresses(address_pk), alert_type VARCHAR(64) NOT NULL, severity VARCHAR(16) NOT NULL, dedup_key VARCHAR(128) UNIQUE, replay_nonce VARCHAR(128) UNIQUE, mode VARCHAR(16) DEFAULT 'REPLAY', triggered_at TIMESTAMPTZ DEFAULT now(), acknowledged_by UUID REFERENCES investigators(investigator_id), acknowledged_at TIMESTAMPTZ);
+CREATE TABLE IF NOT EXISTS investigation_events(event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), case_id UUID NOT NULL REFERENCES cases(case_id), event_type VARCHAR(64) NOT NULL, actor_investigator_id UUID REFERENCES investigators(investigator_id), event_payload JSONB, occurred_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS reports(report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), case_id UUID NOT NULL REFERENCES cases(case_id), version INT DEFAULT 1, generated_by UUID REFERENCES investigators(investigator_id), content_hash VARCHAR(128) NOT NULL, file_ref VARCHAR(256) NOT NULL, signer1 UUID REFERENCES investigators(investigator_id), signer2 UUID REFERENCES investigators(investigator_id), sig1 VARCHAR(256), sig2 VARCHAR(256), day_root VARCHAR(128), kms_key_id VARCHAR(128), generated_at TIMESTAMPTZ DEFAULT now(), UNIQUE(case_id, version));
+CREATE TABLE IF NOT EXISTS api_requests(request_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), provider VARCHAR(64) NOT NULL, endpoint VARCHAR(256) NOT NULL, request_hash VARCHAR(128) NOT NULL, response_hash VARCHAR(128), status_code SMALLINT, latency_ms INT, dedup_key VARCHAR(128) UNIQUE, requested_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS audit_logs(audit_id BIGSERIAL PRIMARY KEY, actor_type VARCHAR(16) NOT NULL, actor_id VARCHAR(128), action VARCHAR(64) NOT NULL, resource_type VARCHAR(64), resource_id UUID, ip_address INET, occurred_at TIMESTAMPTZ DEFAULT now());
+"""
+
+DOWNGRADE = """
+DROP TABLE IF EXISTS audit_logs, api_requests, reports, investigation_events, alerts, risk_assessments, attribution_evidence, attribution_candidates, transaction_paths, label_votes, operator_cases_ext, sponsors_ext, upi_links_ext, upi_vault, vasp_addresses, vasps, transactions, blocks, tokens, wallet_addresses, chains, cases, investigators;
+"""
+
 def upgrade():
-    pass
+    from alembic import op
+    for stmt in [s.strip() for s in DDL.split(";") if s.strip()]:
+        op.execute(stmt)
 
 def downgrade():
-    pass
+    from alembic import op
+    for stmt in [s.strip() for s in DOWNGRADE.split(";") if s.strip()]:
+        op.execute(stmt)

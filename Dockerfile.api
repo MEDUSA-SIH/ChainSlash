@@ -1,7 +1,16 @@
-FROM python:3.12-slim
-WORKDIR /code
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e .
+# syntax=docker/dockerfile:1.7
+FROM python:3.12-slim AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 APP_HOME=/code
+RUN apt-get update && apt-get install -y --no-install-recommends tini curl libpq-dev gcc && rm -rf /var/lib/apt/lists/* && groupadd --system --gid 1000 chainx && useradd --system --uid 1000 --gid chainx --create-home --shell /bin/bash chainx
+WORKDIR ${APP_HOME}
+COPY pyproject.toml alembic.ini ./
 COPY app/ ./app/
 COPY alembic/ ./alembic/
+COPY scripts/ ./scripts/
+RUN pip install --no-cache-dir -e .
+RUN chown -R chainx:chainx ${APP_HOME}
+USER chainx
+EXPOSE 8000
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=10 CMD curl -fsS http://localhost:8000/health || exit 1
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -17,5 +17,12 @@ dependencies = [
   "python-jose",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "ruff", "passlib[bcrypt]", "python-jose[cryptography]", "structlog"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
